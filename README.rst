@@ -9,7 +9,7 @@ QMTRxn
 
 A calculator for 1D QMT coefficients
 
-Based off of https://github.com/SJ-Ang/PyTUN
+See the notebooks for use, Python scripts coming soon!
 
 Usage
 -----
