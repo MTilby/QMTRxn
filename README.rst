@@ -1,7 +1,7 @@
 .. image:: https://raw.githubusercontent.com/MTilby/QMTRxn/main/QMT_logo.png
     :alt: QMTRxn logo
     :align: center
-    :width: 600px
+    :width: 1200px
 
 QMTRxn
 ======
