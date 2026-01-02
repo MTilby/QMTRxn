@@ -3,7 +3,6 @@
     :align: center
     :width: 1200px
 
-QMTRxn
 ======
 
 .. image:: https://img.shields.io/pypi/v/QMTRxn.svg
