@@ -1,4 +1,4 @@
-.. image:: https://raw.githubusercontent.com/MTilby/edit/QMT_logo.png
+.. image:: https://raw.githubusercontent.com/MTilby/QMTRxn/main/QMT_logo.png
     :alt: QMTRxn logo
     :align: center
     :width: 300px
