@@ -1,15 +1,14 @@
+.. image:: https://img.shields.io/pypi/v/QMTRxn.svg
+    :target: https://pypi.python.org/pypi/QMTRxn
+    :alt: Latest PyPI version
+
+
 .. image:: https://raw.githubusercontent.com/MTilby/QMTRxn/main/QMT_logo.png
     :alt: QMTRxn logo
     :align: center
     :width: 1200px
 
 ======
-
-.. image:: https://img.shields.io/pypi/v/QMTRxn.svg
-    :target: https://pypi.python.org/pypi/QMTRxn
-    :alt: Latest PyPI version
-
-
 
 A calculator for 1D QMT coefficients
 
