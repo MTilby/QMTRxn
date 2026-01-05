@@ -1,5 +1,6 @@
 import csv
 import os
+import extractor
 from argparse import ArgumentParser
 
 ### set current directory ###
@@ -13,9 +14,12 @@ def GetArgs():
 
     parser = ArgumentParser()
 
+    parser.add_argument("-s", "--software", type=str, choices=["ORCA","G16"], default="ORCA", help="software used for the calculation")
     parser.add_argument("-csv", "--csv", type=str, help="name of .csv file with information on data to extract")
     parser.add_argument("-p", "--project", type=str, help="name of the directory to iterate")
     parser.add_argument("-dir", "--directory", action="store_true", help="searches in subdirectories for ORCA output files")
+
+    parser.add_argument("-T", "--temperature", type=float, help="temperature to recalcuate thermochemistry")
 
     args = parser.parse_args()
 
@@ -83,7 +87,25 @@ else:
                 calc = file.removesuffix(".out")
                 calc_files.setdefault(calc, path)
 
-print(calc_files)
+            elif file.endswith(".log") and args.software == "G16":
+                calc = file.removesuffix(".log")
+                calc_files[calc] = path
+
+
+for calc in calc_files.values():
+    if args.software == "ORCA":
+        orca_calc = extractor.orca(calc)
+        print(calc)
+        orca_data = orca_calc.extractor()
+        
+        print(orca_data)
+
+    elif args.software =='G16':
+        g16_calc = extractor.g16(calc)
+        g16_data = g16_calc.extractor()
+        print(calc)
+        print(g16_data)
+
 
 
 
