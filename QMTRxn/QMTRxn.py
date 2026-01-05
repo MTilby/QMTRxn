@@ -19,7 +19,22 @@ def GetArgs():
     parser.add_argument("-p", "--project", type=str, help="name of the directory to iterate")
     parser.add_argument("-dir", "--directory", action="store_true", help="searches in subdirectories for ORCA output files")
 
+    parser.add_argument("-qhH", "--quasi_harmonic_enthalpy", action="store_true", help="switch on quasi harmonic approx. for enthalpy contribution in thermochemistry recalculation")
+    parser.add_argument("-emet", "--entropy_method", type=str, choices=["Truhlar", "RRHO", None], default=None, help="correction method to apply to the entropy in thermochemistry recalculation, automatically uses quasi-RRHO")
+
     parser.add_argument("-T", "--temperature", type=float, help="temperature to recalcuate thermochemistry")
+    parser.add_argument("-atm", "--atom", type=float, help="atmosphere to recalcuate thermochemistry")
+    parser.add_argument("-conc", "--concentration", type=float, help="concentration to recalcuate thermochemistry")
+
+    parser.add_argument("-symno", "--symmetry_number", type=float, help="provided symmetry number of the molecule in thermochemistry recalculation")
+    parser.add_argument("-fs", "--freq_scale", type=float, help="frequency scale factor to apply in thermochemistry recalculation")
+    parser.add_argument("-inv", "--freq_invert", action="store_true", help="invert immaginary frequencies in thermochemistry recalculation, the default is false") 
+    parser.add_argument("-lf", "--low_freq", type=float, help="converts low frquency numbers to a given value in thermochemistry recalculation")
+
+    parser.add_argument("-v0H", "--v0H", type=float, help="frequncy value in cm-1 to use for quasi-RRHO enthalpy correction in thermochemistry recalculation")
+    parser.add_argument("-alphaH", "--alphaH", type=float, help="alpha value to use for quasi-RRHO enthalpy in thermochemistry recalculation")
+    parser.add_argument("-v0S", "--v0S", type=float, help="frequncy value in cm-1 to use for quasi-RRHO and Truhlar entropy correction in thermochemistry recalculation")
+    parser.add_argument("-alphaS", "--alphaS", type=float, help="alpha value to use for quasi-RRHO entropy correction in thermochemistry recalculation")
 
     args = parser.parse_args()
 
