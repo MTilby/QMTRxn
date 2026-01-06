@@ -43,6 +43,24 @@ def GetArgs():
 if __name__ == "__main__":
     args = GetArgs()
 
+thermo_trig = [
+    "quasi_harmonic_enthalpy",
+    "entropy_method",
+    "temperature",
+    "atom",
+    "concentration",
+    "symmetry_number",
+    "freq_scale",
+    "freq_invert",
+    "low_freq",
+    "v0H",
+    "alphaH",
+    "v0S",
+    "alphaS",
+]
+
+args.do_thermo = any(getattr(args, name) not in (None, False)for name in thermo_trig)
+
 ### Function for file extraction from .csv - potentially move to other script for clarity - and allow passing of other data types in a jupyter notebook ###
 
 def csvfile(csvfile):
@@ -107,19 +125,25 @@ else:
                 calc_files[calc] = path
 
 
-for calc in calc_files.values():
+
+
+for calc in calc_files:
     if args.software == "ORCA":
-        orca_calc = extractor.orca(calc)
-        print(calc)
-        orca_data = orca_calc.extractor()
-        
-        print(orca_data)
+        orca_calc = extractor.orca(calc, calc_files[calc])
+        orca_data = orca_calc.energies() 
+
+        energy, orca_xyz = orca_calc.xyz()
+        print(energy)
+        print(orca_xyz)
+            
 
     elif args.software =='G16':
-        g16_calc = extractor.g16(calc)
-        g16_data = g16_calc.extractor()
-        print(calc)
-        print(g16_data)
+        g16_calc = extractor.g16(calc, calc_files[calc])
+        g16_data = g16_calc.energies()
+
+        energy, g16_xyz = g16_calc.xyz()
+        print(energy)
+        print(g16_xyz)
 
 
 

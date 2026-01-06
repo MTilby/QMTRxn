@@ -1,12 +1,14 @@
 import constants
+import os
 
 class orca:
     """Class to extract data from ORCA output files."""
-    def __init__(self, file):
+    def __init__(self, calc, file):
+        self.calc = calc
         self.file = file
     
-    def extractor(self):
-        """Extract relevant data from the ORCA output file."""
+    def energies(self):
+        """Extract relevant thermochemical data from the ORCA output file."""
 
         thermo_data = {}
 
@@ -113,20 +115,93 @@ class orca:
                 if 'imaginary mode' in line.replace('*',''):
                     thermo_data['im_freq'] = line.split()[1]
 
-                if thermo_data['E'] is None and line.startswith('FINAL SINGLE POINT ENERGY'):
-                    thermo_data['E'] = float(line.split()[4])
-
                 if thermo_data['vdw'] is None and line.startswith('Dispersion correction'):
                     thermo_data['vdw'] = float(line.split()[2])
 
             return thermo_data
-        
+
+    def xyz(self):
+        """Extract relevant xyz data from the ORCA output file."""
+        energy = None  
+        xyz_dict = {}
+
+        if self.file.endswith('.property.txt'): 
+            vdw = None
+            with open(self.file, 'r') as file:
+                lines = file.readlines()
+
+            if not any("NORMAL TERMINATION" in line.upper() for line in lines):
+                return energy, xyz_dict
+
+            for i in range(len(lines) - 1, -1, -1):
+                lower_line = lines[i].lower()
+
+                if '&natoms' in lower_line:
+                    num_atoms = int(lower_line.split()[3])
+
+                if '&cartesiancoordinates' in lower_line and not xyz_dict:
+                    units = lower_line.split()[5].replace("\"", "").replace("]", "")
+                    
+                    for j, k in enumerate(range(i + 1, i + 1 + num_atoms)):
+                        line_split = lines[k].split()
+                        atom = line_split[0]
+
+                        if units == 'bohr':
+                            xyz = (float(line_split[1]) * constants.constants.bohr_A, float(line_split[2]) * constants.constants.bohr_A, float(line_split[3]) * constants.constants.bohr_A) 
+
+                        else:
+                            xyz = (float(line_split[1]), float(line_split[2]), float(line_split[3]))
+                        
+                        xyz_dict[f"{atom}_{j}"] = xyz
+
+                if '&finalen' in lower_line and energy is None:
+                    energy = float(lower_line.split()[3])
+
+                if '&vdw' in lower_line and vdw is None:
+                    energy += float(lower_line.split()[3])
+
+            return energy, xyz_dict
+
+
+        elif self.file.endswith('.out'):    
+            with open(self.file, 'r') as file:
+                lines = file.readlines()
+
+            if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in lines):
+                return energy, xyz_dict
+                
+            if any("the optimization did not converge"in line.lower() for line in lines):
+                return energy, xyz_dict
+
+            for i in range(len(lines) - 1, -1, -1):
+                upper_line = lines[i].upper()
+
+                if 'CARTESIAN COORDINATES (ANGSTROEM)' in upper_line and not xyz_dict:
+                    for j, k in enumerate(range(i + 2, len(lines) - 1)):
+                        
+                        line_split = lines[k].split()
+
+                        if not line_split:
+                            break
+
+                        atom = line_split[0]
+
+                        xyz = (float(line_split[1]), float(line_split[2]), float(line_split[3]))
+
+                        xyz_dict[f"{atom}_{j}"] = xyz
+
+                if upper_line.startswith('FINAL SINGLE POINT ENERGY') and energy is None:
+                    energy = float(upper_line.split()[4])
+                
+            return energy, xyz_dict
+                
 class g16:
     """Class to extract data from G16 output files."""
-    def __init__(self, file):
+    def __init__(self, calc, file):
+        self.calc = calc
         self.file = file
     
-    def extractor(self):
+    def energies(self):
         """Extract relevant data from the G16 output file."""
 
         thermo_data = {}
@@ -202,4 +277,41 @@ class g16:
             if thermo_data['ST'] is not None:
                 thermo_data['ST'] = thermo_data['ST'] * thermo_data['T']
 
-            return thermo_data                
+            return thermo_data   
+
+    def xyz(self):
+        """Extract relevant xyz data from the G16 output file."""             
+        energy = None  
+        xyz_dict = {}
+
+        if self.file.endswith(".out") or self.file.endswith(".log"):
+            with open(self.file, 'r') as file:
+                lines = file.readlines()
+
+            if not any("normal termination of gaussian 16" in line.lower() for line in lines):
+                return energy, xyz_dict
+
+            for i in range(len(lines) - 1, -1, -1):
+                line = lines[i]
+                lower_line = line.lower()
+
+                if 'coordinates (angstroms)' in lower_line and not xyz_dict:
+                    for j, k in enumerate(range(i + 3, len(lines) - 1)):
+                        
+                        line_split = lines[k].split()
+
+                        if "---" in lines[k]:
+                            break
+                        
+                        atom_idx = int(line_split[1])
+                        atom = list(constants.constants.atom_map.keys())[atom_idx-1]
+
+                        xyz = (float(line_split[3]), float(line_split[4]), float(line_split[5]))
+
+                        xyz_dict[f"{atom}_{j}"] = xyz
+
+                if energy is None and 'scf done' in lower_line:
+                    energy = float(line.split(":")[1].split()[2])
+                
+            return energy, xyz_dict
+
