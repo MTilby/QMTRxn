@@ -1,6 +1,7 @@
 import csv
 import os
 import extractor
+import functions
 from argparse import ArgumentParser
 
 ### set current directory ###
@@ -19,17 +20,22 @@ def GetArgs():
     parser.add_argument("-p", "--project", type=str, help="name of the directory to iterate")
     parser.add_argument("-dir", "--directory", action="store_true", help="searches in subdirectories for ORCA output files")
 
+    parser.add_argument("-iso", "--isotope", type=str, help="element to change mass of")
+    parser.add_argument("-m", "--mass", type=float, help="mass to change a give element set by --isotope/-iso to")
+    parser.add_argument("-map", "--atom_mapping", type=dict, help="atom mapping to change atom in the ith position to the provided mass")
+
     parser.add_argument("-qhH", "--quasi_harmonic_enthalpy", action="store_true", help="switch on quasi harmonic approx. for enthalpy contribution in thermochemistry recalculation")
     parser.add_argument("-emet", "--entropy_method", type=str, choices=["Truhlar", "RRHO", None], default=None, help="correction method to apply to the entropy in thermochemistry recalculation, automatically uses quasi-RRHO")
 
     parser.add_argument("-T", "--temperature", type=float, help="temperature to recalcuate thermochemistry")
-    parser.add_argument("-atm", "--atom", type=float, help="atmosphere to recalcuate thermochemistry")
+    parser.add_argument("-atm", "--atm", type=float, help="atmosphere to recalcuate thermochemistry")
     parser.add_argument("-conc", "--concentration", type=float, help="concentration to recalcuate thermochemistry")
 
     parser.add_argument("-symno", "--symmetry_number", type=float, help="provided symmetry number of the molecule in thermochemistry recalculation")
     parser.add_argument("-fs", "--freq_scale", type=float, help="frequency scale factor to apply in thermochemistry recalculation")
-    parser.add_argument("-inv", "--freq_invert", action="store_true", help="invert immaginary frequencies in thermochemistry recalculation, the default is false") 
-    parser.add_argument("-lf", "--low_freq", type=float, help="converts low frquency numbers to a given value in thermochemistry recalculation")
+    parser.add_argument("-inv", "--freq_invert", choices=['All', 'nonTS', None], default=None, help="invert immaginary frequencies in thermochemistry recalculation, the default is false") 
+    parser.add_argument("-fco", "--freq_cutoff", type=float, help="cutoff value to convert low frquency numbers to a given value in thermochemistry recalculation")
+    parser.add_argument("-lf", "--low_freq", type=float, help="value to convert low frquency numbers to a given value in thermochemistry recalculation")
 
     parser.add_argument("-v0H", "--v0H", type=float, help="frequncy value in cm-1 to use for quasi-RRHO enthalpy correction in thermochemistry recalculation")
     parser.add_argument("-alphaH", "--alphaH", type=float, help="alpha value to use for quasi-RRHO enthalpy in thermochemistry recalculation")
@@ -43,22 +49,30 @@ def GetArgs():
 if __name__ == "__main__":
     args = GetArgs()
 
+if bool(args.isotope) != bool(args.mass):
+    print(f"To change the isot")
+
+freq_trig = [
+    "freq_scale",
+    "freq_invert",
+    "freq_cutoff",
+    "low_freq"
+]
+
 thermo_trig = [
     "quasi_harmonic_enthalpy",
     "entropy_method",
     "temperature",
-    "atom",
+    "atm",
     "concentration",
     "symmetry_number",
-    "freq_scale",
-    "freq_invert",
-    "low_freq",
     "v0H",
     "alphaH",
     "v0S",
     "alphaS",
 ]
 
+args.do_freq = any(getattr(args, name) not in (None, False)for name in freq_trig)
 args.do_thermo = any(getattr(args, name) not in (None, False)for name in thermo_trig)
 
 ### Function for file extraction from .csv - potentially move to other script for clarity - and allow passing of other data types in a jupyter notebook ###
@@ -128,24 +142,42 @@ else:
 
 
 for calc in calc_files:
-    if args.software == "ORCA":
-        orca_calc = extractor.orca(calc, calc_files[calc])
-        orca_data = orca_calc.energies() 
+    energies= {}
 
-        energy, orca_xyz = orca_calc.xyz()
-        print(energy)
-        print(orca_xyz)
-            
+    if args.software == "ORCA":
+        calc_data = extractor.orca(calc, calc_files[calc])
 
     elif args.software =='G16':
-        g16_calc = extractor.g16(calc, calc_files[calc])
-        g16_data = g16_calc.energies()
+        calc_data = extractor.g16(calc, calc_files[calc])
 
-        energy, g16_xyz = g16_calc.xyz()
-        print(energy)
-        print(g16_xyz)
+    if args.do_thermo or args.do_freq:
+        energy, xyz = calc_data.xyz()
+        vib = calc_data.vib()
+
+        if args.do_freq:
+            neg_freq_found = False
+            for freq in vib:
+                if vib[freq] < 0:
+                    neg_freq_found = True
+                
+                freq_new, neg_freq_found = functions.frequencies(vib[freq]).correction(getattr(args, "freq_scale", None), getattr(args, "freq_invert", None), getattr(args, "freq_cutoff", None), getattr(args, "low_freq", None), neg_freq_found)
+                
+                vib[freq] = freq_new
+
+    else:
+        energies = calc_data.energies() 
 
 
+    if not energies:
+        xyz_data = functions.XYZ(xyz)
+        #print(xyz_data.xyz)
+        
+        xyz_data.isotope('C', 10, None) #None
+        print(xyz_data.xyz)
+        
+
+    else:
+        print('yes')
 
 
 

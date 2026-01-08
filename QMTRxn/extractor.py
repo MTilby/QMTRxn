@@ -1,22 +1,24 @@
 import constants
 import os
+from functions import hessian
 
 class orca:
     """Class to extract data from ORCA output files."""
     def __init__(self, calc, file):
         self.calc = calc
         self.file = file
-    
+
+        with open(self.file, 'r') as text:
+            self.lines = text.readlines()
+
     def energies(self):
         """Extract relevant thermochemical data from the ORCA output file."""
 
         thermo_data = {}
 
         if self.file.endswith(".property.txt"):
-            with open(self.file, 'r') as file:
-                lines = file.readlines()
 
-            if not any("NORMAL TERMINATION" in line.upper() for line in lines):
+            if not any("NORMAL TERMINATION" in line.upper() for line in self.lines):
                 return thermo_data
             
             keywords = {
@@ -43,8 +45,8 @@ class orca:
             
             thermo_data.update({key: None for key in keywords.values()})
 
-            for i in range(len(lines) - 1, -1, -1):
-                line = lines[i]
+            for i in range(len(self.lines) - 1, -1, -1):
+                line = self.lines[i]
                 upper_line = line.upper()
                 for keyword, key in keywords.items():
                     if thermo_data[key] is None and keyword in upper_line:
@@ -54,8 +56,8 @@ class orca:
                     vib_count = int(line.split()[3])
 
                     for j in range(i + 5, i + 5 + vib_count):
-                        if float(lines[j].split()[1]) < 0:
-                            thermo_data['im_freq'] = float(lines[j].split()[1])
+                        if float(self.lines[j].split()[1]) < 0:
+                            thermo_data['im_freq'] = float(self.lines[j].split()[1])
                             break
 
 
@@ -71,13 +73,11 @@ class orca:
 
 
         elif self.file.endswith(".out"):
-            with open(self.file, 'r') as file:
-                lines = file.readlines()
 
-            if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in lines):
+            if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in self.lines):
                 return thermo_data
                    
-            if any("the optimization did not converge"in line.lower() for line in lines):
+            if any("the optimization did not converge"in line.lower() for line in self.lines):
                 return thermo_data
             
             thermo_data.update({'vdw':None})
@@ -104,8 +104,8 @@ class orca:
                 
             thermo_data.update({key: None for key in keywords.values()})
             
-            for i in range(len(lines) - 1, -1, -1):
-                line = lines[i]
+            for i in range(len(self.lines) - 1, -1, -1):
+                line = self.lines[i]
                 lower_line = line.lower().replace(" ","")
                 for keyword, key in keywords.items():
                     if thermo_data[key] is None and keyword in lower_line:
@@ -127,14 +127,12 @@ class orca:
 
         if self.file.endswith('.property.txt'): 
             vdw = None
-            with open(self.file, 'r') as file:
-                lines = file.readlines()
 
-            if not any("NORMAL TERMINATION" in line.upper() for line in lines):
+            if not any("NORMAL TERMINATION" in line.upper() for line in self.lines):
                 return energy, xyz_dict
 
-            for i in range(len(lines) - 1, -1, -1):
-                lower_line = lines[i].lower()
+            for i in range(len(self.lines) - 1, -1, -1):
+                lower_line = self.lines[i].lower()
 
                 if '&natoms' in lower_line:
                     num_atoms = int(lower_line.split()[3])
@@ -143,7 +141,7 @@ class orca:
                     units = lower_line.split()[5].replace("\"", "").replace("]", "")
                     
                     for j, k in enumerate(range(i + 1, i + 1 + num_atoms)):
-                        line_split = lines[k].split()
+                        line_split = self.lines[k].split()
                         atom = line_split[0]
 
                         if units == 'bohr':
@@ -164,22 +162,20 @@ class orca:
 
 
         elif self.file.endswith('.out'):    
-            with open(self.file, 'r') as file:
-                lines = file.readlines()
 
-            if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in lines):
+            if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in self.lines):
                 return energy, xyz_dict
                 
-            if any("the optimization did not converge"in line.lower() for line in lines):
+            if any("the optimization did not converge"in line.lower() for line in self.lines):
                 return energy, xyz_dict
 
-            for i in range(len(lines) - 1, -1, -1):
-                upper_line = lines[i].upper()
+            for i in range(len(self.lines) - 1, -1, -1):
+                upper_line = self.lines[i].upper()
 
                 if 'CARTESIAN COORDINATES (ANGSTROEM)' in upper_line and not xyz_dict:
-                    for j, k in enumerate(range(i + 2, len(lines) - 1)):
+                    for j, k in enumerate(range(i + 2, len(self.lines) - 1)):
                         
-                        line_split = lines[k].split()
+                        line_split = self.lines[k].split()
 
                         if not line_split:
                             break
@@ -194,12 +190,169 @@ class orca:
                     energy = float(upper_line.split()[4])
                 
             return energy, xyz_dict
-                
+        
+    def vib(self): 
+        """Extract relevant vib data from the ORCA output file."""
+        vib_dict = {}
+        freq_found = False
+
+        if self.file.endswith(".property.txt"):
+
+            if not any("NORMAL TERMINATION" in line.upper() for line in self.lines):
+                return vib_dict
+
+            for i in range(len(self.lines) - 1, -1, -1):
+
+                if freq_found == True:
+                    break
+
+                upper_line = self.lines[i].upper()   
+
+                if "&FREQ " in upper_line:
+                    freq_found = True
+                    freq_start_index = self.lines.index(self.lines[i]) + 3 
+                    for freq_line in self.lines[freq_start_index:]:
+                        freq_line_upper = freq_line.upper()
+                        if freq_line_upper.strip().startswith("&ZPE"): 
+                            break
+                        freq = float(freq_line.split()[1])
+
+                        index = len(vib_dict) 
+                        vib_dict[f"v_{index}"] = freq
+     
+            return vib_dict 
+ 
+
+        elif self.file.endswith(".out"):
+
+            if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in self.lines):
+                return vib_dict
+                   
+            if any("the optimization did not converge"in line.lower() for line in self.lines):
+                return vib_dict
+            
+            for i in range(len(self.lines) - 1, -1, -1):
+
+                if freq_found == True:
+                    break
+
+                upper_line = self.lines[i].upper()   
+
+                if "VIBRATIONAL FREQUENCIES" in upper_line:
+                    freq_found = True
+                    freq_start_index = self.lines.index(self.lines[i]) + 5 
+                    for freq_line in self.lines[freq_start_index:]:
+                        freq_line_upper = freq_line.upper()
+                        if not freq_line_upper.strip(): 
+                            break
+                        
+                        freq = float(freq_line.split()[1])
+
+                        index = len(vib_dict) 
+                        vib_dict[f"v_{index}"] = freq
+     
+            return vib_dict                    
+
+
+    def hess(self):
+        """Extract hessian data from the ORCA output file."""
+
+        hess_dict = {}
+        hess_found = False
+
+        if self.file.endswith(".property.txt"):
+
+            if not any("NORMAL TERMINATION" in line.upper() for line in self.lines):
+                return hess_dict, hess_found        
+
+            for i in range(len(self.lines) - 1, -1, -1):
+
+                upper_line = self.lines[i].upper()   
+
+                if "&HESSIAN" in upper_line:
+                    hess_found = True
+                    dim = int(self.lines[i].split()[4].replace('(','').split(',')[0])
+
+                    for n in range(dim):
+                        hess_dict[str(n)] = []
+
+                    for j in range(i + 1, len(self.lines) - 1, dim + 2):  
+                        if '&MODES' in self.lines[j]:
+                            break
+                        
+                        for k in range(j + 1, j + 2 + dim):
+                            hess_all = self.lines[k].split()
+                            
+                            if hess_all:
+                                idx = hess_all[0]
+                                hess = hess_all[1:]
+                                
+                                hess_dict[str(idx)].extend(map(float, hess))
+                        
+            return hess_dict, hess_found
+        
+        elif self.file.endswith(".out"):
+            mass_weight = {}
+
+            if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in self.lines):
+                return hess_dict, hess_found
+                   
+            if any("the optimization did not converge"in line.lower() for line in self.lines):
+                return hess_dict, hess_found
+            
+            for i in range(len(self.lines) - 1, -1, -1): 
+
+                upper_line = self.lines[i].upper()   
+
+                if "NORMAL MODES" in upper_line:
+                    hess_found = True
+
+                    for j in range(i+8, i + 8 + len(self.lines) - 1):
+                        if '--' in self.lines[j]:
+                            break
+
+                        if len(self.lines[j].split()) == 7:
+                            idx = self.lines[j].split()[0]
+                            hess_m = self.lines[j].split()[1:]
+                          
+                            if idx in list(mass_weight.keys()):
+                                mass_weight[str(idx)].extend(hess_m)
+
+                            else:
+                                mass_weight[str(idx)] = hess_m
+
+
+            energy, coord = self.xyz()
+            hessian({'C_0': (2.9e-05, 3e-06, -2e-05), 'H=M(21)_1': (-0.633672, -0.824007, -0.332627), 'H_2': (-0.441594, 0.947845, -0.3127), 'H_3': (0.082917, -0.021117, 1.088053), 'H_4': (0.99232, -0.102724, -0.442706)}).hess(mass_weight)
+
+            hessian(coord).hess(mass_weight)
+
+
+
+
+            
+            
+
+            
+            return hess_dict, hess_found
+
+
+                    
+
+
+                                            
+
+
+
+               
 class g16:
     """Class to extract data from G16 output files."""
     def __init__(self, calc, file):
         self.calc = calc
         self.file = file
+        
+        with open(self.file, 'r') as text:
+            self.lines = text.readlines()
     
     def energies(self):
         """Extract relevant data from the G16 output file."""
@@ -207,10 +360,8 @@ class g16:
         thermo_data = {}
 
         if self.file.endswith(".out") or self.file.endswith(".log"):
-            with open(self.file, 'r') as file:
-                lines = file.readlines()
 
-            if not any("normal termination of gaussian 16" in line.lower() for line in lines):
+            if not any("normal termination of gaussian 16" in line.lower() for line in self.lines):
                 return thermo_data
 
             keywords = {
@@ -235,8 +386,8 @@ class g16:
 
             thermo_data.update({key: None for key in keywords.values()})
 
-            for i in range(len(lines) - 1, -1, -1):
-                line = lines[i]
+            for i in range(len(self.lines) - 1, -1, -1):
+                line = self.lines[i]
                 lower_line = line.lower()
                 for keyword, key in keywords.items():
                     if thermo_data[key] is None and keyword in lower_line:
@@ -251,23 +402,23 @@ class g16:
 
                 if 'e (thermal)' in lower_line:
                     for j in range(i + 2, i+7):
-                        if lines[j].split()[0] == "Total":
-                            thermo_data['ST'] = float(lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal
+                        if self.lines[j].split()[0] == "Total":
+                            thermo_data['ST'] = float(self.lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal
 
-                        elif lines[j].split()[0] == "Electronic":
-                            thermo_data['Qel'] = float(lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal
+                        elif self.lines[j].split()[0] == "Electronic":
+                            thermo_data['Qel'] = float(self.lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal
 
-                        elif lines[j].split()[0] == "Translational":
-                            thermo_data['Utrans'] = float(lines[j].split()[1])  / constants.constants.ha_kcal
-                            thermo_data['Qtrans'] = float(lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal 
+                        elif self.lines[j].split()[0] == "Translational":
+                            thermo_data['Utrans'] = float(self.lines[j].split()[1])  / constants.constants.ha_kcal
+                            thermo_data['Qtrans'] = float(self.lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal 
 
-                        elif lines[j].split()[0] == "Rotational":
-                            thermo_data['Urot'] = float(lines[j].split()[1])  / constants.constants.ha_kcal  
-                            thermo_data['Qrot'] = float(lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal      
+                        elif self.lines[j].split()[0] == "Rotational":
+                            thermo_data['Urot'] = float(self.lines[j].split()[1])  / constants.constants.ha_kcal  
+                            thermo_data['Qrot'] = float(self.lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal      
 
-                        elif lines[j].split()[0] == "Vibrational":
-                            thermo_data['Uvib'] = float(lines[j].split()[1])  / constants.constants.ha_kcal  
-                            thermo_data['Qvib'] = float(lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal 
+                        elif self.lines[j].split()[0] == "Vibrational":
+                            thermo_data['Uvib'] = float(self.lines[j].split()[1])  / constants.constants.ha_kcal  
+                            thermo_data['Qvib'] = float(self.lines[j].split()[3]) * 10e-3  / constants.constants.ha_kcal 
 
                               
                 if thermo_data['E'] is None and 'scf done' in lower_line:
@@ -285,22 +436,20 @@ class g16:
         xyz_dict = {}
 
         if self.file.endswith(".out") or self.file.endswith(".log"):
-            with open(self.file, 'r') as file:
-                lines = file.readlines()
 
-            if not any("normal termination of gaussian 16" in line.lower() for line in lines):
+            if not any("normal termination of gaussian 16" in line.lower() for line in self.lines):
                 return energy, xyz_dict
 
-            for i in range(len(lines) - 1, -1, -1):
-                line = lines[i]
+            for i in range(len(self.lines) - 1, -1, -1):
+                line = self.lines[i]
                 lower_line = line.lower()
 
                 if 'coordinates (angstroms)' in lower_line and not xyz_dict:
-                    for j, k in enumerate(range(i + 3, len(lines) - 1)):
+                    for j, k in enumerate(range(i + 3, len(self.lines) - 1)):
                         
-                        line_split = lines[k].split()
+                        line_split = self.lines[k].split()
 
-                        if "---" in lines[k]:
+                        if "---" in self.lines[k]:
                             break
                         
                         atom_idx = int(line_split[1])
@@ -314,4 +463,32 @@ class g16:
                     energy = float(line.split(":")[1].split()[2])
                 
             return energy, xyz_dict
+
+    def vib(self):
+        vib_dict = {'v_0': 0.0, 'v_1': 0.0, 'v_2': 0.0, 'v_3': 0.0, 'v_4': 0.0, 'v_5': 0.0}
+
+        if self.file.endswith(".out") or self.file.endswith(".log"):
+
+            if not any("normal termination of gaussian 16" in line.lower() for line in self.lines):
+                return vib_dict
+        
+            for i in range(len(self.lines) - 1):
+                  
+                if self.lines[i].startswith(' Frequencies'):
+                        
+                        freq_1 = float(self.lines[i].split()[2])
+                        freq_2 = float(self.lines[i].split()[3])
+                        freq_3 = None
+
+                        if len(self.lines[i].split()) == 4:
+                            freq_3 = float(self.lines[i].split()[4])
+
+                        index = len(vib_dict) 
+                        vib_dict[f"v_{index}"] = freq_1
+                        vib_dict[f"v_{index+1}"] = freq_2
+
+                        if freq_3:
+                            vib_dict[f"v_{index+2}"] = freq_3  
+
+            return vib_dict                  
 
