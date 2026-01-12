@@ -11,6 +11,7 @@ class constants:
     ha_kcal = 6.275094740631E2  ### kcal mol-1 Hartree-1
     ha_j = 4.359744650E-18      ### J Hartree-1
     bohr_A = 0.529177249        ### A bohr-1
+    bohr_m = 0.529177249E-10    ### m bohr-1
     PI = math.pi
     atom_map = {'H': 1.008,	'He': 4.0026, 'Li': 7, 'Be': 9.012183, 'B': 10.81, 'C': 12.011, 
                 'N': 14.007, 'O': 15.999, 'F': 18.99840316,	'Ne': 20.18, 'Na': 22.9897693, 

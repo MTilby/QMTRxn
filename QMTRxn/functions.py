@@ -1,46 +1,73 @@
 import constants
 import math
+import re
 import numpy as np
 from itertools import combinations
 from pointgroup import PointGroup
 
 class frequencies:
-    def __init__(self, freq):
-        self.freq = freq
+    def __init__(self, vib):
+        self.vib = vib
 
-    def correction(self, scale, invert, cutoff, lowfreq, neg_freq_found): 
-        if not scale:
-            scale = 1.0
+    def correction(self, scale, invert, cutoff, lowfreq, map): 
 
-        if invert == 'All':
-            freq = abs(self.freq * float(scale))
+        new_vib = {}
+        neg_freq_found = False
 
-        elif invert == 'nonTS':
-            if self.freq < 0 and neg_freq_found == False:
-                freq = self.freq * float(scale)
+        for v, value in self.vib.items():
+
+            if value < 0:
                 neg_freq_found = True
 
-            else:
-                freq = abs(self.freq * float(scale))
-        
-        else:
-            freq = self.freq * float(scale)
+            if not scale:
+                scale = 1.0
 
-        if cutoff and abs(self.freq) <= cutoff and self.freq != 0:
-            if lowfreq:
+            if invert == 'All':
+                freq = abs(value * float(scale))
+
+            elif invert == 'nonTS':
+                if self.freq < 0 and neg_freq_found == False:
+                    freq = value * float(scale)
+                    neg_freq_found = True
+
+                else:
+                    freq = abs(value * float(scale))
+            
+            else:
+                freq = value * float(scale)
+
+            if cutoff and abs(value) <= cutoff and value != 0:
+                if lowfreq:
+                    freq = lowfreq
+                else:
+                    freq = cutoff
+            elif lowfreq and abs(value) <= lowfreq and value != 0:
                 freq = lowfreq
-            else:
-                freq = cutoff
-        elif lowfreq and abs(self.freq) <= lowfreq and self.freq != 0:
-            freq = lowfreq
 
-        return freq, neg_freq_found
+            if map:
+                index = int(''.join(filter(str.isdigit, v)))
+
+                for v_new, value_new in map.items():
+                    if type(v_new) == int:
+                        map_index = v_new - 1
+                    else:
+                        map_index = int(''.join(filter(str.isdigit, v_new))) - 1
+
+                    if map_index == index:
+                        freq =  value_new
+
+            new_vib[v] = freq
+            
+        return new_vib
+
+
+
 
 class XYZ:
     def __init__(self, xyz):
         self.xyz = xyz
 
-    def isotope(self, change_atom, mass, map): ###recalc hessian
+    def isotope(self, change_atom, mass, map): 
         new_xyz = {}
    
         if map:
@@ -78,9 +105,11 @@ class XYZ:
                     atom_label = atom
                 new_xyz[atom_label] = value
 
-            self.xyz = new_xyz
+
+        else:
+            new_xyz = self.xyz
         
-            return new_xyz
+        return new_xyz
             
 
     def bond_vector(self, atom1, atom2):
@@ -96,34 +125,35 @@ class XYZ:
         else:
             atom_pairs = list(combinations(self.xyz, 2))
             first_pair = atom_pairs[0]
-            print(first_pair)
             bv_first = self.bond_vector(self.xyz[first_pair[0]], self.xyz[first_pair[1]])
             
             for atom in self.xyz:
                 if atom != first_pair[0] and atom != first_pair[1]:
                     bv_other = self.bond_vector(self.xyz[first_pair[0]], self.xyz[atom])
-                    cross_product = np.dot(bv_first, bv_other)
-                    if cross_product == float(1):
+                    if np.linalg.norm(np.cross(bv_first, bv_other)) < 1e-6:
                         return True
                     
             return False
         
-    def inertia(self):
+    def inertia(self, use_matrix=False):
         mass = [constants.constants.atom_map.get(''.join(filter(str.isalpha, atom))) for atom in self.xyz]
         coords = np.array([self.xyz[atom] for atom in self.xyz])
 
         total_mass = np.sum(mass)
-        print(total_mass)
         cent = np.dot(mass, coords) / total_mass
 
         cent_coord = coords - cent
         inertia_matrix = sum(
             m * (np.identity(3) * np.dot(xyz, xyz) - np.outer(xyz, xyz))
-            for m, xyz in zip(mass, cent_coord)
-        )
-        inertia, _ = np.linalg.eigh(inertia_matrix)
+            for m, xyz in zip(mass, cent_coord))
+        
+        inertia, eigenvector = np.linalg.eigh(inertia_matrix) 
 
-        return inertia
+        if use_matrix == True:
+            return inertia_matrix, eigenvector, cent_coord
+
+        else:
+            return inertia
     
     def symmno(self):
         elements = [''.join(filter(str.isalpha, atom)) for atom in self.xyz]
@@ -137,17 +167,52 @@ class XYZ:
 
 class hessian:
     def __init__(self, xyz):
-        self.xyz = xyz
+        self.xyz = XYZ(xyz) 
 
-    def mass_hess(self, matrix):
-        print('gets mass w hessian')
-
-    def hess(self, matrix):
-        for atom_id in self.xyz:
+    def mass_extract(self):
+        mass_list = []
+        for atom_id in self.xyz.xyz:
             if '=' in atom_id:
-                mass = int(''.join(filter(str.isdigit, atom_id.split('=')[1].split('_')[0])))
-                print(mass)
+                mass = float(re.search(r'M\(([\d\.]+)\)', atom_id).group(1))
+                mass_list.extend([mass]*3)
 
+
+            else:
+                mass = float(constants.constants.atom_map.get(''.join(filter(str.isalpha, atom_id))))
+                mass_list.extend([mass]*3)
+
+        return np.array(mass_list)
+
+    def frequency(self, hessian_matrix, normal_modes):
+        freqs = {}
+        hess_array = np.array([v for v in hessian_matrix.values()])
+        normal_array = np.array([v for v in normal_modes.values()])
+        hess_nm =  normal_array.T @ hess_array @  normal_array
+
+        eigenvalues = np.diag(hess_nm) * constants.constants.ha_j / (constants.constants.amu_kg * constants.constants.bohr_m **2)
+
+        frequencies = np.sqrt((eigenvalues) / (4 * (constants.constants.PI ** 2) * (constants.constants.c ** 2)))  
+
+        for i, freq in enumerate(frequencies):
+            freqs[f"v_{i}"] = float(freq)
+
+        return freqs
+
+    def mass_weight(self, matrix):
+        normal_modes = {}
+        mass_array = self.mass_extract()
+        matrix_array = np.array([v for v in matrix.values()]) 
+        matrix_mw = matrix_array / np.sqrt(mass_array)
+         
+        norms = np.linalg.norm(matrix_mw, axis=0)
+        norms[norms < 1e-10] = 1.0
+
+        matrix_mw = matrix_mw / norms
+
+        for i in matrix:
+            normal_modes[i] = matrix_mw[int(i)].tolist()
+
+        return normal_modes
 
 class thermo:
     def __init__(self, vib_data, inertia, **kwargs):

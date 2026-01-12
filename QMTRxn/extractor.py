@@ -122,7 +122,8 @@ class orca:
 
     def xyz(self):
         """Extract relevant xyz data from the ORCA output file."""
-        energy = None  
+        energy = None 
+        vdw = None 
         xyz_dict = {}
 
         if self.file.endswith('.property.txt'): 
@@ -152,11 +153,15 @@ class orca:
                         
                         xyz_dict[f"{atom}_{j}"] = xyz
 
+
                 if '&finalen' in lower_line and energy is None:
                     energy = float(lower_line.split()[3])
 
                 if '&vdw' in lower_line and vdw is None:
-                    energy += float(lower_line.split()[3])
+                    vdw = float(lower_line.split()[3])
+
+            if vdw:
+                energy += vdw 
 
             return energy, xyz_dict
 
@@ -254,30 +259,95 @@ class orca:
             return vib_dict                    
 
 
-    def hess(self):
-        """Extract hessian data from the ORCA output file."""
+    def normal_modes(self, xyz=None):
+        """Extract normal modes data from the ORCA output file."""
 
-        hess_dict = {}
-        hess_found = False
+        nm_dict = {}
 
         if self.file.endswith(".property.txt"):
 
             if not any("NORMAL TERMINATION" in line.upper() for line in self.lines):
-                return hess_dict, hess_found        
+                return nm_dict       
+
+            for i in range(len(self.lines) - 1, -1, -1):
+
+                upper_line = self.lines[i].upper()   
+
+                if "&MODES" in upper_line:
+                    dim = int(self.lines[i].split()[4].replace('(','').split(',')[0])
+
+                    for n in range(dim):
+                        nm_dict[str(n)] = []
+
+                    for j in range(i + 1, len(self.lines) - 1, dim + 2):  
+                        if '$end' in self.lines[j].lower():
+                            break
+                        
+                        for k in range(j + 1, j + 2 + dim):
+                            nm_all = self.lines[k].split()
+                            
+                            if nm_all:
+                                idx = nm_all[0]
+                                nm = nm_all[1:]
+                                
+                                nm_dict[str(idx)].extend(map(float, nm))
+
+            return nm_dict
+        
+        elif self.file.endswith(".hess"):
+            nm_m_weight = {}
+
+
+            for i in range(len(self.lines) - 1, -1, -1):
+
+                lower_line = self.lines[i].lower()   
+
+                if "$normal_modes" in lower_line:
+                    dim = int(self.lines[i+1].split()[0])
+
+                    for n in range(dim):
+                        nm_m_weight[str(n)] = []
+
+                    for j in range(i + 2, len(self.lines) - 1, dim + 1):  
+                        if '#' in self.lines[j] or not self.lines[j].strip():
+                            break
+                        
+                        for k in range(j + 1, j + 1 + dim):
+                            nm_all = self.lines[k].split()
+                            
+                            if nm_all:
+                                idx = nm_all[0]
+                                nm = nm_all[1:]
+                                
+                                nm_m_weight[str(idx)].extend(map(float, nm))
+
+            nm_dict = hessian(xyz).mass_weight(nm_m_weight)
+                        
+            return nm_dict
+
+            
+
+    def hessian(self):
+        """Extract the raw hessian data from the ORCA output file."""         
+        hess_dict = {}
+
+        if self.file.endswith(".property.txt"):
+
+            if not any("NORMAL TERMINATION" in line.upper() for line in self.lines):
+                return hess_dict      
 
             for i in range(len(self.lines) - 1, -1, -1):
 
                 upper_line = self.lines[i].upper()   
 
                 if "&HESSIAN" in upper_line:
-                    hess_found = True
                     dim = int(self.lines[i].split()[4].replace('(','').split(',')[0])
 
                     for n in range(dim):
                         hess_dict[str(n)] = []
 
                     for j in range(i + 1, len(self.lines) - 1, dim + 2):  
-                        if '&MODES' in self.lines[j]:
+                        if '&modes' in self.lines[j].lower():
                             break
                         
                         for k in range(j + 1, j + 2 + dim):
@@ -289,62 +359,36 @@ class orca:
                                 
                                 hess_dict[str(idx)].extend(map(float, hess))
                         
-            return hess_dict, hess_found
-        
-        elif self.file.endswith(".out"):
-            mass_weight = {}
+            return hess_dict
+                           
+        elif self.file.endswith(".hess"):
+            hess_dict = {}
 
-            if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in self.lines):
-                return hess_dict, hess_found
-                   
-            if any("the optimization did not converge"in line.lower() for line in self.lines):
-                return hess_dict, hess_found
-            
-            for i in range(len(self.lines) - 1, -1, -1): 
+            for i in range(len(self.lines) - 1, -1, -1):
 
-                upper_line = self.lines[i].upper()   
+                lower_line = self.lines[i].lower()   
 
-                if "NORMAL MODES" in upper_line:
-                    hess_found = True
+                if "$hessian" in lower_line:
+                    dim = int(self.lines[i+1].split()[0])
 
-                    for j in range(i+8, i + 8 + len(self.lines) - 1):
-                        if '--' in self.lines[j]:
+                    for n in range(dim):
+                        hess_dict[str(n)] = []
+
+                    for j in range(i + 2, len(self.lines) - 1, dim + 1):  
+                        if '#' in self.lines[j] or not self.lines[j].strip():
                             break
+                        
+                        for k in range(j + 1, j + 1 + dim):
+                            nm_all = self.lines[k].split()
+                            
+                            if nm_all:
+                                idx = nm_all[0]
+                                nm = nm_all[1:]
+                                
+                                hess_dict[str(idx)].extend(map(float, nm))
+                        
+            return hess_dict
 
-                        if len(self.lines[j].split()) == 7:
-                            idx = self.lines[j].split()[0]
-                            hess_m = self.lines[j].split()[1:]
-                          
-                            if idx in list(mass_weight.keys()):
-                                mass_weight[str(idx)].extend(hess_m)
-
-                            else:
-                                mass_weight[str(idx)] = hess_m
-
-
-            energy, coord = self.xyz()
-            hessian({'C_0': (2.9e-05, 3e-06, -2e-05), 'H=M(21)_1': (-0.633672, -0.824007, -0.332627), 'H_2': (-0.441594, 0.947845, -0.3127), 'H_3': (0.082917, -0.021117, 1.088053), 'H_4': (0.99232, -0.102724, -0.442706)}).hess(mass_weight)
-
-            hessian(coord).hess(mass_weight)
-
-
-
-
-            
-            
-
-            
-            return hess_dict, hess_found
-
-
-                    
-
-
-                                            
-
-
-
-               
 class g16:
     """Class to extract data from G16 output files."""
     def __init__(self, calc, file):

@@ -1,7 +1,10 @@
+import ast
 import csv
 import os
+import re
 import extractor
 import functions
+import numpy as np
 from argparse import ArgumentParser
 
 ### set current directory ###
@@ -22,7 +25,7 @@ def GetArgs():
 
     parser.add_argument("-iso", "--isotope", type=str, help="element to change mass of")
     parser.add_argument("-m", "--mass", type=float, help="mass to change a give element set by --isotope/-iso to")
-    parser.add_argument("-map", "--atom_mapping", type=dict, help="atom mapping to change atom in the ith position to the provided mass")
+    parser.add_argument("-amap", "--atom_mapping", type=dict, help="atom mapping to change atom in the ith position to the provided mass")
 
     parser.add_argument("-qhH", "--quasi_harmonic_enthalpy", action="store_true", help="switch on quasi harmonic approx. for enthalpy contribution in thermochemistry recalculation")
     parser.add_argument("-emet", "--entropy_method", type=str, choices=["Truhlar", "RRHO", None], default=None, help="correction method to apply to the entropy in thermochemistry recalculation, automatically uses quasi-RRHO")
@@ -30,12 +33,13 @@ def GetArgs():
     parser.add_argument("-T", "--temperature", type=float, help="temperature to recalcuate thermochemistry")
     parser.add_argument("-atm", "--atm", type=float, help="atmosphere to recalcuate thermochemistry")
     parser.add_argument("-conc", "--concentration", type=float, help="concentration to recalcuate thermochemistry")
-
     parser.add_argument("-symno", "--symmetry_number", type=float, help="provided symmetry number of the molecule in thermochemistry recalculation")
+
     parser.add_argument("-fs", "--freq_scale", type=float, help="frequency scale factor to apply in thermochemistry recalculation")
     parser.add_argument("-inv", "--freq_invert", choices=['All', 'nonTS', None], default=None, help="invert immaginary frequencies in thermochemistry recalculation, the default is false") 
     parser.add_argument("-fco", "--freq_cutoff", type=float, help="cutoff value to convert low frquency numbers to a given value in thermochemistry recalculation")
     parser.add_argument("-lf", "--low_freq", type=float, help="value to convert low frquency numbers to a given value in thermochemistry recalculation")
+    parser.add_argument("-vmap", "--freq_mapping", type=str, help="mapping to change the frequencies")
 
     parser.add_argument("-v0H", "--v0H", type=float, help="frequncy value in cm-1 to use for quasi-RRHO enthalpy correction in thermochemistry recalculation")
     parser.add_argument("-alphaH", "--alphaH", type=float, help="alpha value to use for quasi-RRHO enthalpy in thermochemistry recalculation")
@@ -48,6 +52,20 @@ def GetArgs():
 
 if __name__ == "__main__":
     args = GetArgs()
+
+if args.atom_mapping:
+    s = re.sub(r'([{,]\s*)([A-Za-z_]\w*)(\s*:)', r'\1"\2"\3', args.atom_mapping)
+    amap = ast.literal_eval(s)
+
+else:
+    amap = None
+
+if args.freq_mapping:
+    s = re.sub(r'([{,]\s*)([A-Za-z_]\w*)(\s*:)', r'\1"\2"\3', args.freq_mapping)
+    vmap = ast.literal_eval(s)
+
+else:
+    vmap = None
 
 if bool(args.isotope) != bool(args.mass):
     print(f"To change the isot")
@@ -123,20 +141,19 @@ else:
 
     for root in roots:
         for file in os.listdir(root):
-            path = os.path.join(root, file)
-
 
             if file.endswith(".property.txt"):
                 calc = file.removesuffix(".property.txt")
-                calc_files[calc] = path
+                calc_files[calc] = os.path.join(root, file)
 
             elif file.endswith(".out") and file.count(".") == 1:
                 calc = file.removesuffix(".out")
-                calc_files.setdefault(calc, path)
+                calc_files[calc] = os.path.join(root, file)
 
             elif file.endswith(".log") and args.software == "G16":
                 calc = file.removesuffix(".log")
-                calc_files[calc] = path
+                calc_files[calc] = os.path.join(root, file)
+
 
 
 
@@ -154,27 +171,39 @@ for calc in calc_files:
         energy, xyz = calc_data.xyz()
         vib = calc_data.vib()
 
-        if args.do_freq:
-            neg_freq_found = False
-            for freq in vib:
-                if vib[freq] < 0:
-                    neg_freq_found = True
-                
-                freq_new, neg_freq_found = functions.frequencies(vib[freq]).correction(getattr(args, "freq_scale", None), getattr(args, "freq_invert", None), getattr(args, "freq_cutoff", None), getattr(args, "low_freq", None), neg_freq_found)
-                
-                vib[freq] = freq_new
+        if args.do_freq:                
+            vib = functions.frequencies(vib).correction(getattr(args, "freq_scale", None), getattr(args, "freq_invert", None), getattr(args, "freq_cutoff", None), getattr(args, "low_freq", None), vmap)
 
     else:
         energies = calc_data.energies() 
 
 
     if not energies:
-        xyz_data = functions.XYZ(xyz)
-        #print(xyz_data.xyz)
+
+        nm = calc_data.normal_modes(xyz)
+        hess = calc_data.hessian()
+
+        if args.software == "ORCA" and calc_files[calc].endswith(".out"):
+            hess_file = f"{calc_files[calc].removesuffix(".out")}.hess"
+            
+            nm = extractor.orca(calc, hess_file).normal_modes(xyz)
+            hess = extractor.orca(calc, hess_file).hessian()
+            
+            fs = np.array(list(vib.values())) / np.array(list(functions.hessian(xyz).frequency(hess, nm).values()))
+            fs = np.nan_to_num(fs, nan=1.0)
+            
+            nm_array = np.array(list(nm.values())) * fs
+            nm = {str(i): nm_array[i].tolist() for i in range(len(nm_array))}
+
         
-        xyz_data.isotope('C', 10, None) #None
-        print(xyz_data.xyz)
-        
+        print(calc)
+        print('xyz',xyz)
+        print('hess',hess)
+        print('nm',nm)
+        freq = functions.hessian(xyz).frequency(hess, nm)
+        print('freq',freq)
+        print(' ')
+
 
     else:
         print('yes')
