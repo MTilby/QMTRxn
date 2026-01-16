@@ -27,9 +27,6 @@ def GetArgs():
     parser.add_argument("-m", "--mass", type=float, help="mass to change a give element set by --isotope/-iso to")
     parser.add_argument("-amap", "--atom_mapping", type=dict, help="atom mapping to change atom in the ith position to the provided mass")
 
-    parser.add_argument("-qhH", "--quasi_harmonic_enthalpy", action="store_true", help="switch on quasi harmonic approx. for enthalpy contribution in thermochemistry recalculation")
-    parser.add_argument("-emet", "--entropy_method", type=str, choices=["Truhlar", "RRHO", None], default=None, help="correction method to apply to the entropy in thermochemistry recalculation, automatically uses quasi-RRHO")
-
     parser.add_argument("-T", "--temperature", type=float, help="temperature to recalcuate thermochemistry")
     parser.add_argument("-atm", "--atm", type=float, help="atmosphere to recalcuate thermochemistry")
     parser.add_argument("-conc", "--concentration", type=float, help="concentration to recalcuate thermochemistry")
@@ -40,6 +37,9 @@ def GetArgs():
     parser.add_argument("-fco", "--freq_cutoff", type=float, help="cutoff value to convert low frquency numbers to a given value in thermochemistry recalculation")
     parser.add_argument("-lf", "--low_freq", type=float, help="value to convert low frquency numbers to a given value in thermochemistry recalculation")
     parser.add_argument("-vmap", "--freq_mapping", type=str, help="mapping to change the frequencies")
+
+    parser.add_argument("-qhH", "--quasi_harmonic_enthalpy", action="store_true", help="switch on quasi harmonic approx. for enthalpy contribution in thermochemistry recalculation")
+    parser.add_argument("-emet", "--entropy_method", type=str, choices=["Truhlar", "RRHO", None], default=None, help="correction method to apply to the entropy in thermochemistry recalculation, automatically uses quasi-RRHO")
 
     parser.add_argument("-v0H", "--v0H", type=float, help="frequncy value in cm-1 to use for quasi-RRHO enthalpy correction in thermochemistry recalculation")
     parser.add_argument("-alphaH", "--alphaH", type=float, help="alpha value to use for quasi-RRHO enthalpy in thermochemistry recalculation")
@@ -52,6 +52,9 @@ def GetArgs():
 
 if __name__ == "__main__":
     args = GetArgs()
+
+if args.atm and args.concentration:
+    print('Both atm and conc are given will use atmosphere')
 
 if args.atom_mapping:
     s = re.sub(r'([{,]\s*)([A-Za-z_]\w*)(\s*:)', r'\1"\2"\3', args.atom_mapping)
@@ -68,7 +71,7 @@ else:
     vmap = None
 
 if bool(args.isotope) != bool(args.mass):
-    print(f"To change the isot")
+    print(f"Requires specification of atom and a new mass")
 
 freq_trig = [
     "freq_scale",
@@ -154,12 +157,10 @@ else:
                 calc = file.removesuffix(".log")
                 calc_files[calc] = os.path.join(root, file)
 
-
-
-
-
+properties = {}
 for calc in calc_files:
     energies= {}
+    vib = None
 
     if args.software == "ORCA":
         calc_data = extractor.orca(calc, calc_files[calc])
@@ -167,46 +168,39 @@ for calc in calc_files:
     elif args.software =='G16':
         calc_data = extractor.g16(calc, calc_files[calc])
 
+    xyz = calc_data.xyz()
+    
+    if args.isotope or args.atom_mapping:
+        no_neg = sum(1 for v in calc_data.vib().values() if v < 0)
+        xyz = functions.XYZ(xyz).isotope(getattr(args, "isotope", None), getattr(args, "mass", None), getattr(args, "atom_mapping", None))
+        hess = calc_data.hessian()
+        hess_mw = functions.hessian(xyz).mass_weight(hess) 
+        vib = functions.hessian(xyz).frequency(hess_mw, no_neg)
+
     if args.do_thermo or args.do_freq:
-        energy, xyz = calc_data.xyz()
-        vib = calc_data.vib()
+        if not vib:
+            vib = calc_data.vib()
 
         if args.do_freq:                
             vib = functions.frequencies(vib).correction(getattr(args, "freq_scale", None), getattr(args, "freq_invert", None), getattr(args, "freq_cutoff", None), getattr(args, "low_freq", None), vmap)
 
+    elif vib:
+        pass 
+
     else:
         energies = calc_data.energies() 
-
+        
 
     if not energies:
-
-        nm = calc_data.normal_modes(xyz)
-        hess = calc_data.hessian()
-
-        if args.software == "ORCA" and calc_files[calc].endswith(".out"):
-            hess_file = f"{calc_files[calc].removesuffix(".out")}.hess"
-            
-            nm = extractor.orca(calc, hess_file).normal_modes(xyz)
-            hess = extractor.orca(calc, hess_file).hessian()
-            
-            fs = np.array(list(vib.values())) / np.array(list(functions.hessian(xyz).frequency(hess, nm).values()))
-            fs = np.nan_to_num(fs, nan=1.0)
-            
-            nm_array = np.array(list(nm.values())) * fs
-            nm = {str(i): nm_array[i].tolist() for i in range(len(nm_array))}
-
-        
         print(calc)
-        print('xyz',xyz)
-        print('hess',hess)
-        print('nm',nm)
-        freq = functions.hessian(xyz).frequency(hess, nm)
-        print('freq',freq)
-        print(' ')
+        energy, spin = calc_data.e_spin()
 
+        energies = functions.thermo(xyz, vib, getattr(args, "temperature", None)).thermo_data(energy, spin, getattr(args, "quasi_harmonic_enthalpy", None), getattr(args, "v0H", None), getattr(args, "alphaH", None), 
+            getattr(args, "atm", None), getattr(args, "concentration", None), getattr(args, "symmetry_number", None), getattr(args, "entropy_method", None), getattr(args, "v0S", None), getattr(args, "alphaS", None))
 
-    else:
-        print('yes')
+    properties[calc] = energies
+
+print(properties)
 
 
 

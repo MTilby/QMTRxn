@@ -1,5 +1,6 @@
 import constants
 import os
+import numpy as np
 from functions import hessian
 
 class orca:
@@ -11,10 +12,66 @@ class orca:
         with open(self.file, 'r') as text:
             self.lines = text.readlines()
 
+    def e_spin(self):
+        "extract just the single point energy and the spin"
+        e_spin = {}
+
+        if self.file.endswith(".property.txt"):
+
+            if not any("NORMAL TERMINATION" in line.upper() for line in self.lines):
+                return None, None
+
+            keywords = {
+                '&FINALENERGY': 'E',
+                '&VDW': 'VDW',
+                'GCP_ENERGY': 'gCP',
+                "&ELENERGY": 'El_e',
+                "&FINALEN": 'E_therm',
+                '&MULT': 'Spin',
+                }
+        
+            e_spin.update({key: 0 for key in keywords.values()})
+
+            for i in range(len(self.lines) - 1, -1, -1):
+                line = self.lines[i]
+                upper_line = line.upper()
+                for keyword, key in keywords.items():
+                    if e_spin[key] is 0 and keyword in upper_line:
+                        e_spin[key] = float(line.split()[3])   
+
+            if e_spin['E'] == 0:
+                if e_spin['E_therm'] != 0:
+                    e_spin['E'] = e_spin['E_therm']
+                else:
+                    e_spin['E'] = e_spin['El_e'] + e_spin['VDW'] + e_spin['gCP'] 
+
+        elif self.file.endswith(".out"):
+
+            if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in self.lines):
+                return None, None
+                   
+            if any("the optimization did not converge"in line.lower() for line in self.lines):
+                return None, None
+
+            e_spin = {'E':0,'Spin':0}
+
+            for i in range(len(self.lines) - 1, -1, -1):
+                line = self.lines[i]
+                
+                if e_spin['E'] == 0 and 'FINAL SINGLE POINT ENERGY' in line:
+                    e_spin['E'] = float(line.split()[4])
+
+                if e_spin['Spin'] == 0 and 'Multiplicity' in line:
+                    e_spin['Spin'] = float(line.split(':')[1])       
+
+        return e_spin['E'], e_spin['Spin'] 
+
     def energies(self):
         """Extract relevant thermochemical data from the ORCA output file."""
 
         thermo_data = {}
+        vdw = None
+        gcp = None
 
         if self.file.endswith(".property.txt"):
 
@@ -22,7 +79,10 @@ class orca:
                 return thermo_data
             
             keywords = {
-                '&VDW': 'vdw',
+                '&TOTALMASS': 'Mass',
+                '&PRESSURE': 'P',
+                '&TEMPERATURE': 'T',
+                '&MULT': 'Spin',
                 '&TRANSENERGY': 'Utrans',
                 '&ROTENERGY': 'Urot',
                 '&VIBENERGY': 'Uvib',
@@ -30,10 +90,7 @@ class orca:
                 '&QTRANS': 'Qtrans',
                 '&QROT': 'Qrot',
                 '&QVIB': 'Qvib',
-                '&TEMPERATURE': 'T',
-                '&PRESSURE': 'P',
-                '&TOTALMASS': 'Mass',
-                '&FINALEN': 'E',
+                '&FINALENERGY': 'E',
                 '&ZPE': 'ZPE',
                 '&INNERENERGYU': 'U',
                 '&ENTHALPYH': 'H',
@@ -41,8 +98,7 @@ class orca:
                 '&FREEENERGYG': 'G',
                 '&corr': 'corr'
                 }
-
-            
+        
             thermo_data.update({key: None for key in keywords.values()})
 
             for i in range(len(self.lines) - 1, -1, -1):
@@ -60,9 +116,25 @@ class orca:
                             thermo_data['im_freq'] = float(self.lines[j].split()[1])
                             break
 
+                if "&VDW" in upper_line:
+                    vdw = float(line.split()[3])
 
-            if thermo_data['vdw'] is not None and thermo_data['E'] is not None:
-                thermo_data['E'] += thermo_data['vdw']
+                if "&GCP_ENERGY" in upper_line:
+                    gcp = float(line.split()[3])
+
+            if thermo_data['E'] is None:
+                for i in range(len(self.lines) - 1, -1, -1):
+                    line = self.lines[i]
+                    upper_line = line.upper()
+                    if "&ELENERGY" in upper_line:
+                        thermo_data['E'] = float(line.split()[3])
+                        break
+                    elif "&FINALEN" in upper_line:
+                        therm_data['E'] = float(line.split()[3])
+                        if vdw is not None:
+                            thermo_data['E'] += vdw
+                        if gcp is not None:
+                            thermo_data['E'] += gcp             
 
             if thermo_data['G'] is not None and thermo_data['E'] is not None:
                 thermo_data['corr'] = thermo_data['G'] - thermo_data['E']
@@ -81,8 +153,13 @@ class orca:
                 return thermo_data
             
             thermo_data.update({'vdw':None})
+            thermo_data.update({'Spin':None})
 
             keywords = {
+                'totalmass...': 'Mass',
+                'pressure...': 'P',
+                'temperature...': 'T',
+                '&MULT': 'Spin',
                 'thermaltranslationalcorrection...': 'Utrans',
                 'thermalrotationalcorrection...': 'Urot',
                 'thermalvibrationalcorrection...': 'Uvib',
@@ -90,9 +167,6 @@ class orca:
                 'translationalentropy...': 'Qtrans',
                 'rotationalentropy...': 'Qrot',
                 'vibrationalentropy...': 'Qvib',
-                'pressure...': 'P',
-                'totalmass...': 'Mass',
-                'temperature...': 'T',
                 'electronicenergy...': 'E',
                 'zeropointenergy...': 'ZPE',
                 'totalthermalenergy...': 'U',
@@ -111,26 +185,30 @@ class orca:
                     if thermo_data[key] is None and keyword in lower_line:
 
                         thermo_data[key] = float(line.split('...')[1].split()[0])
+                if thermo_data['Spin'] is None and 'Multiplicity' in line:
+                    thermo_data['Spin'] = float(line.split(':')[1])
+
+                if thermo_data['E'] is None and 'FINAL SINGLE POINT ENERGY' in line:
+                    thermo_data['E'] = float(line.split()[4])
 
                 if 'imaginary mode' in line.replace('*',''):
-                    thermo_data['im_freq'] = line.split()[1]
-
-                if thermo_data['vdw'] is None and line.startswith('Dispersion correction'):
-                    thermo_data['vdw'] = float(line.split()[2])
+                    thermo_data['im_freq'] = float(line.split()[1])
 
             return thermo_data
 
-    def xyz(self):
+    def xyz(self, data=False):
         """Extract relevant xyz data from the ORCA output file."""
         energy = None 
         vdw = None 
         xyz_dict = {}
 
         if self.file.endswith('.property.txt'): 
+            e_calc = None
+            energy = None
             vdw = None
 
             if not any("NORMAL TERMINATION" in line.upper() for line in self.lines):
-                return energy, xyz_dict
+                return None
 
             for i in range(len(self.lines) - 1, -1, -1):
                 lower_line = self.lines[i].lower()
@@ -153,26 +231,13 @@ class orca:
                         
                         xyz_dict[f"{atom}_{j}"] = xyz
 
-
-                if '&finalen' in lower_line and energy is None:
-                    energy = float(lower_line.split()[3])
-
-                if '&vdw' in lower_line and vdw is None:
-                    vdw = float(lower_line.split()[3])
-
-            if vdw:
-                energy += vdw 
-
-            return energy, xyz_dict
-
-
         elif self.file.endswith('.out'):    
 
             if not any("ORCA TERMINATED NORMALLY"in line.upper().replace("*", "") for line in self.lines):
-                return energy, xyz_dict
+                return None
                 
             if any("the optimization did not converge"in line.lower() for line in self.lines):
-                return energy, xyz_dict
+                return None
 
             for i in range(len(self.lines) - 1, -1, -1):
                 upper_line = self.lines[i].upper()
@@ -190,11 +255,8 @@ class orca:
                         xyz = (float(line_split[1]), float(line_split[2]), float(line_split[3]))
 
                         xyz_dict[f"{atom}_{j}"] = xyz
-
-                if upper_line.startswith('FINAL SINGLE POINT ENERGY') and energy is None:
-                    energy = float(upper_line.split()[4])
                 
-            return energy, xyz_dict
+        return xyz_dict 
         
     def vib(self): 
         """Extract relevant vib data from the ORCA output file."""
@@ -257,42 +319,6 @@ class orca:
                         vib_dict[f"v_{index}"] = freq
      
             return vib_dict                    
-
-
-    def normal_modes(self, xyz=None):
-        """Extract normal modes data from the ORCA output file."""
-
-        nm_dict = {}
-
-        if self.file.endswith(".property.txt"):
-
-            if not any("NORMAL TERMINATION" in line.upper() for line in self.lines):
-                return nm_dict       
-
-            for i in range(len(self.lines) - 1, -1, -1):
-
-                upper_line = self.lines[i].upper()   
-
-                if "&MODES" in upper_line:
-                    dim = int(self.lines[i].split()[4].replace('(','').split(',')[0])
-
-                    for n in range(dim):
-                        nm_dict[str(n)] = []
-
-                    for j in range(i + 1, len(self.lines) - 1, dim + 2):  
-                        if '$end' in self.lines[j].lower():
-                            break
-                        
-                        for k in range(j + 1, j + 2 + dim):
-                            nm_all = self.lines[k].split()
-                            
-                            if nm_all:
-                                idx = nm_all[0]
-                                nm = nm_all[1:]
-                                
-                                nm_dict[str(idx)].extend(map(float, nm))
-
-            return nm_dict
         
         elif self.file.endswith(".hess"):
             nm_m_weight = {}
@@ -321,7 +347,7 @@ class orca:
                                 
                                 nm_m_weight[str(idx)].extend(map(float, nm))
 
-            nm_dict = hessian(xyz).mass_weight(nm_m_weight)
+            nm_dict = hessian(xyz).mass_weight_norm(nm_m_weight)
                         
             return nm_dict
 
@@ -397,7 +423,28 @@ class g16:
         
         with open(self.file, 'r') as text:
             self.lines = text.readlines()
-    
+
+    def e_spin(self):
+         if self.file.endswith(".out") or self.file.endswith(".log"):
+            
+            if not any("normal termination of gaussian 16" in line.lower() for line in self.lines):
+                return None  
+
+            e_spin = {'E':None,'Spin':None}
+
+            for i in range(len(self.lines) - 1, -1, -1):
+                line = self.lines[i]
+                lower_line = line.lower()
+
+                if e_spin['E'] is None and 'scf done' in lower_line:
+                    e_spin['E'] = float(line.split(":")[1].split()[2])
+
+                if e_spin['Spin'] is None and 'multiplicity' in lower_line:
+                    e_spin['Spin'] = float(line.split()[5])
+
+            return e_spin['E'], e_spin['Spin']
+
+
     def energies(self):
         """Extract relevant data from the G16 output file."""
 
@@ -409,6 +456,10 @@ class g16:
                 return thermo_data
 
             keywords = {
+                '&MASS': 'Mass',
+                '&PRESSURE': 'P',
+                '&TEMPERATURE': 'T',
+                '&Mult': 'Spin',
                 '&TRANSENERGY': 'Utrans',
                 '&ROTENERGY': 'Urot',
                 '&VIBENERGY': 'Uvib',
@@ -416,9 +467,6 @@ class g16:
                 '&QTRANS': 'Qtrans',
                 '&QROT': 'Qrot',
                 '&QVIB': 'Qvib',
-                '&TEMPERATURE': 'T',
-                '&PRESSURE': 'P',
-                '&MASS': 'Mass',
                 '&FINALEN': 'E',
                 'zero-point correction': 'ZPE',
                 'sum of electronic and thermal energies': 'U',
@@ -437,12 +485,15 @@ class g16:
                     if thermo_data[key] is None and keyword in lower_line:
                         thermo_data[key] = float(line.split("=")[1].split()[0])
 
+                if 'molecular mass' in lower_line:
+                    thermo_data['Mass'] = float(line.split(":")[1].split()[0])
+
                 if 'temperature' in lower_line and 'pressure' in lower_line:
                     thermo_data['T'] = float(line.split()[1])
                     thermo_data['P'] = float(line.split()[4])
 
-                if 'molecular mass' in lower_line:
-                    thermo_data['Mass'] = float(line.split(":")[1].split()[0])
+                if 'multiplicity' in lower_line:
+                    thermod_data['Spin'] = float(line.split()[5])
 
                 if 'e (thermal)' in lower_line:
                     for j in range(i + 2, i+7):
@@ -468,7 +519,6 @@ class g16:
                 if thermo_data['E'] is None and 'scf done' in lower_line:
                     thermo_data['E'] = float(line.split(":")[1].split()[2])
 
-            
             if thermo_data['ST'] is not None:
                 thermo_data['ST'] = thermo_data['ST'] * thermo_data['T']
 
@@ -506,10 +556,10 @@ class g16:
                 if energy is None and 'scf done' in lower_line:
                     energy = float(line.split(":")[1].split()[2])
                 
-            return energy, xyz_dict
+            return xyz_dict
 
     def vib(self):
-        vib_dict = {'v_0': 0.0, 'v_1': 0.0, 'v_2': 0.0, 'v_3': 0.0, 'v_4': 0.0, 'v_5': 0.0}
+        vib_dict = {}
 
         if self.file.endswith(".out") or self.file.endswith(".log"):
 
@@ -519,13 +569,18 @@ class g16:
             for i in range(len(self.lines) - 1):
                   
                 if self.lines[i].startswith(' Frequencies'):
-                        
                         freq_1 = float(self.lines[i].split()[2])
-                        freq_2 = float(self.lines[i].split()[3])
-                        freq_3 = None
 
-                        if len(self.lines[i].split()) == 4:
+                        if len(self.lines[i].split()) == 3:
+                            freq2 = None
+
+                        else: 
+                            freq_2 = float(self.lines[i].split()[3])
+
+                        if len(self.lines[i].split()) == 5:
                             freq_3 = float(self.lines[i].split()[4])
+                        else:
+                            freq3 = None
 
                         index = len(vib_dict) 
                         vib_dict[f"v_{index}"] = freq_1
@@ -535,4 +590,42 @@ class g16:
                             vib_dict[f"v_{index+2}"] = freq_3  
 
             return vib_dict                  
+
+    def hessian(self):
+        hess_dict = {}
+        
+        if self.file.endswith(".out") or self.file.endswith(".log"):
+
+            if not any("normal termination of gaussian 16" in line.lower() for line in self.lines):
+                return hess_dict
+            data = ''
+            for i in range(len(self.lines) - 1):
+                if 'NImag=' in self.lines[i]:
+                    for j in range(i, len(self.lines) - 1):
+                        if ' The archive entry for this job was punched.' in self.lines[j]:
+                            break
+                        
+                        data += self.lines[j].strip()
+            
+            hess_diag = data.split('NImag=')[1].split('\\')[2].split(',')
+            h_elements = [float(x) for x in hess_diag]
+            n = int((-1 + np.sqrt(1 + 8 * len(h_elements))) / 2)
+            
+            for k in range(n):
+                hess_dict[k] = [0.0] * n
+            
+            idx = 0
+            for l in range(n):
+                for m in range(l + 1):
+                    val = h_elements[idx]
+                    hess_dict[l][m] = val 
+                    hess_dict[m][l] = val 
+                    idx += 1
+
+            return hess_dict
+
+
+                
+
+
 
